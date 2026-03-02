@@ -1,0 +1,16 @@
+# 能源受端城市建筑集群与电网友好互动降碳潜力 — 默认配置
+# Default config for building-cluster-grid carbon reduction potential assessment
+
+paths:
+  data_dir: "data"
+  output_dir: "outputs"
+
+# 物理常数 Physical constants
+physics:
+  Ca: 1.005   # 空气比热 kJ/(kg·℃)
+  rhoa: 1.205 # 空气密度 kg/m³
+
+# 城市/区域边界（占位）
+region:
+  city_boundary: null
+  time_range: null
