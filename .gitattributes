@@ -1,0 +1,6 @@
+# Store large project datasets with Git LFS
+"data/energy system/**" filter=lfs diff=lfs merge=lfs -text
+"Matlab code/**" filter=lfs diff=lfs merge=lfs -text
+
+data/*.pkl filter=lfs diff=lfs merge=lfs -text
+data/*.gpkg filter=lfs diff=lfs merge=lfs -text

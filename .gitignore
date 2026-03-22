@@ -11,10 +11,3 @@ outputs/
 # Generated visualization artifacts
 data/*.html
 data/*.png
-
-# Large external datasets (keep local, do not version)
-data/energy system/
-Matlab code/
-macao shape raw/
-openstreetmap-main/
-osm2mat-master/
