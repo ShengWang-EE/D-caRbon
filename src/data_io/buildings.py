@@ -6,6 +6,7 @@ provide helpers for classifying building use.
 from __future__ import annotations
 
 from pathlib import Path
+import re
 from typing import Any
 
 import geopandas as gpd
@@ -29,7 +30,9 @@ def classify_building_use(
     place: str,
     *,
     download_landuse: bool = True,
-) -> gpd.GeoDataFrame:
+    landuse_path: str | Path | None = None,
+    cache_dir: str | Path | None = None,
+) -> tuple[gpd.GeoDataFrame, pd.DataFrame]:
     """
     为建筑数据添加一列 use_category（residential/commercial/industrial/public/unknown）。
 
@@ -39,101 +42,157 @@ def classify_building_use(
     """
 
     df = buildings.copy()
-    n_total = len(df)
 
-    def _classify_use_from_tags(row: pd.Series) -> str:
-        def norm(x: object) -> str:
-            return str(x).strip().lower() if pd.notna(x) and str(x).strip() != "" else ""
+    def _build_property_table(gdf: gpd.GeoDataFrame) -> pd.DataFrame:
+        cols = [c for c in gdf.columns if c != "geometry"]
+        return pd.DataFrame(gdf[cols]).copy()
 
-        b = norm(row.get("building"))
-        bu = norm(row.get("building:use"))
-        amenity = norm(row.get("amenity"))
-        shop = norm(row.get("shop"))
-        office = norm(row.get("office"))
-        lu_tag = norm(row.get("landuse"))
+    def _slug(text: str) -> str:
+        return re.sub(r"[^a-z0-9]+", "_", text.strip().lower()).strip("_")
 
-        # 住宅类
-        residential_keys = {
-            "residential",
-            "apartments",
-            "terrace",
-            "detached",
-            "semidetached_house",
-            "house",
-            "dormitory",
-            "bungalow",
-        }
-        if b in residential_keys or bu in residential_keys or lu_tag == "residential":
-            return "residential"
+    def _normalize_landuse_columns(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+        if gdf.empty:
+            return gdf
+        if "landuse" in gdf.columns:
+            return gdf[["geometry", "landuse"]].rename(columns={"landuse": "landuse_zone"})
+        if "landuse_zone" in gdf.columns:
+            return gdf[["geometry", "landuse_zone"]]
+        return gpd.GeoDataFrame(columns=["geometry", "landuse_zone"], geometry="geometry", crs=gdf.crs)
 
-        # 工业类
-        industrial_keys = {
-            "industrial",
-            "factory",
-            "manufacture",
-            "warehouse",
-            "plant",
-        }
-        if b in industrial_keys or bu in industrial_keys or lu_tag == "industrial":
-            return "industrial"
+    def _load_landuse_source() -> gpd.GeoDataFrame:
+        cache_path: Path | None = None
+        if cache_dir is not None:
+            cache_root = Path(cache_dir)
+            cache_root.mkdir(parents=True, exist_ok=True)
+            cache_path = cache_root / f"landuse_{_slug(place)}.gpkg"
 
-        # 商业/办公类
-        commercial_keys = {
-            "retail",
-            "commercial",
-            "hotel",
-            "supermarket",
-            "mall",
-            "shop",
-        }
-        if b in commercial_keys or bu in commercial_keys:
-            return "commercial"
-        if shop or office:
-            return "commercial"
-        if lu_tag in {"commercial", "retail"}:
-            return "commercial"
+        if landuse_path is not None:
+            local_path = Path(landuse_path)
+            if local_path.exists():
+                try:
+                    return gpd.read_file(local_path)
+                except Exception:
+                    pass
 
-        # 公共服务类（学校、医院、政府等）
-        public_amenities = {
-            "school",
-            "university",
-            "college",
-            "kindergarten",
-            "hospital",
-            "clinic",
-            "library",
-            "police",
-            "fire_station",
-            "townhall",
-            "courthouse",
-            "government",
-            "public_building",
-        }
-        if amenity in public_amenities or b in {"public", "civic"}:
-            return "public"
+        if cache_path is not None and cache_path.exists():
+            try:
+                return gpd.read_file(cache_path)
+            except Exception:
+                pass
 
-        # 其他暂标记为 unknown，后面用 landuse 再补一轮
-        return "unknown"
+        if not download_landuse:
+            return gpd.GeoDataFrame(columns=["geometry", "landuse"], geometry="geometry", crs=df.crs)
 
-    df["use_category"] = df.apply(_classify_use_from_tags, axis=1)
+        downloaded = ox.features_from_place(place, tags={"landuse": True})
+        if downloaded.empty:
+            return downloaded
+
+        if cache_path is not None:
+            try:
+                cache_df = downloaded[[c for c in ["geometry", "landuse"] if c in downloaded.columns]].copy()
+                if "landuse" in cache_df.columns and "geometry" in cache_df.columns:
+                    cache_df.to_file(cache_path, driver="GPKG")
+            except Exception:
+                pass
+        return downloaded
+
+    def _norm_col(col: str) -> pd.Series:
+        if col not in df.columns:
+            return pd.Series("", index=df.index, dtype="object")
+        return df[col].fillna("").astype(str).str.strip().str.lower()
+
+    b = _norm_col("building")
+    bu = _norm_col("building:use")
+    amenity = _norm_col("amenity")
+    shop = _norm_col("shop")
+    office = _norm_col("office")
+    lu_tag = _norm_col("landuse")
+
+    # 住宅类
+    residential_keys = {
+        "residential",
+        "apartments",
+        "terrace",
+        "detached",
+        "semidetached_house",
+        "house",
+        "dormitory",
+        "bungalow",
+    }
+
+    # 工业类
+    industrial_keys = {
+        "industrial",
+        "factory",
+        "manufacture",
+        "warehouse",
+        "plant",
+    }
+
+    # 商业/办公类
+    commercial_keys = {
+        "retail",
+        "commercial",
+        "hotel",
+        "supermarket",
+        "mall",
+        "shop",
+    }
+
+    # 公共服务类（学校、医院、政府等）
+    public_amenities = {
+        "school",
+        "university",
+        "college",
+        "kindergarten",
+        "hospital",
+        "clinic",
+        "library",
+        "police",
+        "fire_station",
+        "townhall",
+        "courthouse",
+        "government",
+        "public_building",
+    }
+
+    df["use_category"] = "unknown"
+
+    residential_mask = b.isin(residential_keys) | bu.isin(residential_keys) | lu_tag.eq("residential")
+    df.loc[residential_mask, "use_category"] = "residential"
+
+    industrial_mask = b.isin(industrial_keys) | bu.isin(industrial_keys) | lu_tag.eq("industrial")
+    df.loc[df["use_category"].eq("unknown") & industrial_mask, "use_category"] = "industrial"
+
+    commercial_mask = (
+        b.isin(commercial_keys)
+        | bu.isin(commercial_keys)
+        | shop.ne("")
+        | office.ne("")
+        | lu_tag.isin({"commercial", "retail"})
+    )
+    df.loc[df["use_category"].eq("unknown") & commercial_mask, "use_category"] = "commercial"
+
+    public_mask = amenity.isin(public_amenities) | b.isin({"public", "civic"})
+    df.loc[df["use_category"].eq("unknown") & public_mask, "use_category"] = "public"
 
     # 若不需要 landuse 兜底，直接返回
     if not download_landuse:
-        return df
+        return df, _build_property_table(df)
 
     n_unknown_before = int((df["use_category"] == "unknown").sum())
     if n_unknown_before == 0:
-        return df
+        return df, _build_property_table(df)
 
-    # 下载同一 place 范围的 landuse 多边形，作为兜底分类依据
-    landuse = ox.features_from_place(place, tags={"landuse": True})
+    # 按“本地优先 + 缓存 + 在线兜底”加载 landuse 多边形。
+    landuse = _load_landuse_source()
     if landuse.empty or "landuse" not in landuse.columns:
-        return df
+        landuse = _normalize_landuse_columns(landuse)
+        if landuse.empty or "landuse_zone" not in landuse.columns:
+            return df, _build_property_table(df)
 
     # Avoid column-name collision in spatial join with buildings' own "landuse".
-    landuse = landuse[["geometry", "landuse"]].rename(
-        columns={"landuse": "landuse_zone"}
-    )
+    landuse = _normalize_landuse_columns(landuse)
     if df.crs and landuse.crs and df.crs != landuse.crs:
         landuse = landuse.to_crs(df.crs)
 
@@ -147,26 +206,6 @@ def classify_building_use(
         predicate="within",
     )
 
-    def _map_landuse_to_use(lu: object) -> str:
-        lu_str = str(lu).strip().lower()
-        if lu_str == "":
-            return "unknown"
-        if lu_str == "residential":
-            return "residential"
-        if lu_str in {"commercial", "retail", "mixed_use"}:
-            return "commercial"
-        if lu_str == "industrial":
-            return "industrial"
-        if lu_str in {
-            "institutional",
-            "education",
-            "recreation_ground",
-            "cemetery",
-            "religious",
-        }:
-            return "public"
-        return "unknown"
-
     # Prefer the explicit renamed column; keep fallbacks for legacy schemas.
     if "landuse_zone" in joined.columns:
         landuse_series = joined["landuse_zone"]
@@ -175,12 +214,29 @@ def classify_building_use(
     elif "landuse" in joined.columns:
         landuse_series = joined["landuse"]
     else:
-        return df
+        return df, _build_property_table(df)
 
-    inferred_use = landuse_series.map(_map_landuse_to_use)
-    for idx, use_cat in zip(joined.index, inferred_use):
-        if use_cat != "unknown":
-            df.at[idx, "use_category"] = use_cat
+    lu_norm = landuse_series.fillna("").astype(str).str.strip().str.lower()
+    inferred_use = lu_norm.map(
+        {
+            "residential": "residential",
+            "commercial": "commercial",
+            "retail": "commercial",
+            "mixed_use": "commercial",
+            "industrial": "industrial",
+            "institutional": "public",
+            "education": "public",
+            "recreation_ground": "public",
+            "cemetery": "public",
+            "religious": "public",
+        }
+    ).fillna("unknown")
 
-    return df
+    valid_inferred = inferred_use[inferred_use.ne("unknown")]
+    if not valid_inferred.empty:
+        # Spatial join can produce duplicate building indexes; keep one deterministic label.
+        inferred_by_building = valid_inferred.groupby(level=0).first()
+        df.loc[inferred_by_building.index, "use_category"] = inferred_by_building.to_numpy()
+
+    return df, _build_property_table(df)
 

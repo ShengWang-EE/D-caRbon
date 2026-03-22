@@ -1,0 +1,17 @@
+{
+  "python.defaultInterpreterPath": "C:\\Users\\wangs\\OneDrive - Newcastle University\\Documents_Newcastle\\Python_code\\D-caRbon\\.venv\\Scripts\\python.exe",
+  "terminal.integrated.env.windows": {
+    "PATH": "C:\\Users\\wangs\\OneDrive - Newcastle University\\Documents_Newcastle\\Python_code\\D-caRbon\\.venv\\Scripts;${env:PATH}"
+  },
+  "terminal.integrated.profiles.windows": {
+    "Python (.venv)": {
+      "path": "C:\\Windows\\System32\\cmd.exe",
+      "args": [
+        "/k",
+        "C:\\Users\\wangs\\OneDrive - Newcastle University\\Documents_Newcastle\\Python_code\\D-caRbon\\.venv\\Scripts\\activate.bat"
+      ],
+      "icon": "terminal-cmd",
+      "overrideName": true
+    }
+  }
+}

@@ -1,0 +1,268 @@
+\documentclass[conference]{IEEEtran}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{booktabs}
+\usepackage{siunitx}
+\usepackage{bm}
+\usepackage{graphicx}
+\usepackage{hyperref}
+
+\title{Method Description for Building Flexibility and Micro-Meteorological Feedback in Macau}
+\author{\IEEEauthorblockN{Project Method Draft}}
+
+\begin{document}
+\maketitle
+
+\section{Method}
+This study estimates building-level cooling flexibility, local air-temperature modification by air-conditioning (AC) heat rejection, and the resulting feedback on equivalent electric flexibility metrics for the building stock of Macau. The computational workflow implemented in the current Python model consists of four coupled stages: 1) building temperature interpolation from weather-station observations; 2) building thermal-state and equivalent flexibility estimation; 3) grid-based micro-meteorological feedback calculation; and 4) temperature-feedback updating of building flexibility metrics.
+
+\subsection{Baseline Data and Building Classification}
+The workflow reads a building footprint dataset from OpenStreetMap (OSM), together with hourly or sub-hourly meteorological observations from multiple weather stations in Macau. Each building is assigned a use category, denoted by $u_i \in \{\text{residential}, \text{commercial}, \text{public}, \text{industrial}, \text{unknown}\}$, using a rule-based classifier that first parses OSM building tags and then, for unresolved cases, infers use type from surrounding land-use polygons.
+
+\subsection{Building Temperature Estimation from Weather Stations}
+For each building $i$, the ambient building temperature series is estimated from the measured station temperature matrix. Let $T_s(t)$ denote the temperature at station $s$ and time step $t$, and let $d_{is}$ be the Euclidean distance between building $i$ and station $s$. In the current implementation, the station weights are defined as
+\begin{equation}
+    w_{is} = \frac{d_{is}^2}{\sum_{s'=1}^{N_s} d_{is'}^2},
+\end{equation}
+where $N_s$ is the number of weather stations. The building temperature series is then
+\begin{equation}
+    T_i(t) = \sum_{s=1}^{N_s} w_{is} T_s(t).
+\end{equation}
+When a scalar ambient temperature is required for temperature-dependent parameter updates, the supplied building temperature series is reduced to its temporal mean,
+\begin{equation}
+    \bar{T}_i = \frac{1}{N_t} \sum_{t=1}^{N_t} T_i(t),
+\end{equation}
+where $N_t$ is the number of time samples in the provided series.
+
+\subsection{Building Geometry and Thermal Envelope Parameters}
+For each building $i$, the footprint area $A^{\mathrm{fp}}_i$ is obtained from the available polygon area attribute or, if unavailable, from the projected building geometry. The effective building height $H_i$ is assigned using a hierarchical strategy:
+\begin{enumerate}
+    \item direct use of available height attributes;
+    \item conversion from building levels using \SI{3}{m} per floor;
+    \item spatial-context estimation from nearby buildings with similar footprint size.
+\end{enumerate}
+The building volume is then
+\begin{equation}
+    V_i = A^{\mathrm{fp}}_i H_i.
+\end{equation}
+
+The facade area is estimated from the building perimeter $P_i$ and height:
+\begin{equation}
+    A^{\mathrm{fac}}_i = P_i H_i.
+\end{equation}
+If perimeter is unavailable, it is approximated from the equivalent square footprint:
+\begin{equation}
+    P_i \approx 4\sqrt{A^{\mathrm{fp}}_i}.
+\end{equation}
+
+The roof area is set equal to the footprint area,
+\begin{equation}
+    A^{\mathrm{roof}}_i = A^{\mathrm{fp}}_i.
+\end{equation}
+Using a use-type-dependent window-to-wall ratio $\mathrm{WWR}_i$, the facade is partitioned into window and opaque wall areas:
+\begin{align}
+    A^{\mathrm{win}}_i &= \mathrm{WWR}_i A^{\mathrm{fac}}_i, \\
+    A^{\mathrm{wall}}_i &= (1-\mathrm{WWR}_i) A^{\mathrm{fac}}_i.
+\end{align}
+The total effective heat-transfer area is
+\begin{equation}
+    A^{s}_i = A^{\mathrm{wall}}_i + A^{\mathrm{roof}}_i + A^{\mathrm{win}}_i.
+\end{equation}
+
+\subsection{Envelope Transmittance and Air Exchange Rate}
+Each building is assigned a construction vintage band, denoted by $b_i \in \{A, B, C\}$, using either the directly available construction year or a $k$-nearest-neighbor imputation based on geometry-related features. Band-specific midpoint U-values are then assigned for wall, roof, and window components:
+\begin{equation}
+    \left(U^{\mathrm{wall}}_i, U^{\mathrm{roof}}_i, U^{\mathrm{win}}_i \right) \leftarrow \mathcal{U}(b_i).
+\end{equation}
+An equivalent overall transmittance is obtained by area weighting:
+\begin{equation}
+    U_i =
+    \frac{
+    U^{\mathrm{wall}}_i A^{\mathrm{wall}}_i
+    + U^{\mathrm{roof}}_i A^{\mathrm{roof}}_i
+    + U^{\mathrm{win}}_i A^{\mathrm{win}}_i
+    }{
+    A^{\mathrm{wall}}_i + A^{\mathrm{roof}}_i + A^{\mathrm{win}}_i
+    }.
+\end{equation}
+
+The air-exchange rate is assigned deterministically from building type and vintage:
+\begin{equation}
+    N^{\mathrm{ex}}_i = N^{\mathrm{base}}(u_i)\,\phi(b_i),
+\end{equation}
+where $N^{\mathrm{base}}(u_i)$ is the base air-exchange rate for use type $u_i$, and $\phi(b_i)$ is a vintage-dependent multiplier. In the energy and power equations, the air-exchange rate is converted from \si{h^{-1}} to \si{s^{-1}}:
+\begin{equation}
+    \tilde{N}^{\mathrm{ex}}_i = \frac{N^{\mathrm{ex}}_i}{3600}.
+\end{equation}
+
+\subsection{Temperature-Dependent COP Model}
+The coefficient of performance (COP) is assigned according to building use type and corrected by ambient temperature. Let $\mathrm{COP}^{\mathrm{base}}(u_i)$ be the base COP associated with use type $u_i$. The implemented ambient correction is linear:
+\begin{equation}
+    \mathrm{COP}_i =
+    \mathrm{clip}
+    \left(
+    \mathrm{COP}^{\mathrm{base}}(u_i)
+    - k_{\mathrm{cop}}(\bar{T}_i - T_{\mathrm{ref}}),
+    \mathrm{COP}_{\min},
+    \mathrm{COP}_{\max}
+    \right),
+\end{equation}
+where $k_{\mathrm{cop}}=\SI{0.05}{K^{-1}}$, $T_{\mathrm{ref}}=\SI{30}{^\circ C}$, $\mathrm{COP}_{\min}=2.5$, and $\mathrm{COP}_{\max}=4.0$.
+
+\subsection{Comfort Band and Equivalent Electric Flexibility}
+The comfort setpoint is modeled as a weighted combination of a use-type-based nominal setpoint and an adaptive comfort correction:
+\begin{equation}
+    T^{\ast}_i = (1-\alpha)\left(T^{\mathrm{base}}_{u_i} + \epsilon_i\right) + \alpha \left(17.8 + 0.31\bar{T}_i\right),
+\end{equation}
+where $\alpha$ is the adaptive comfort weight and $\epsilon_i$ is a zero-mean Gaussian user-preference perturbation. Lower and upper comfort bounds are then defined as
+\begin{align}
+    T^{\min}_i &= T^{\ast}_i - \Delta T^{-}_{u_i}, \\
+    T^{\max}_i &= T^{\ast}_i + \Delta T^{+}_{u_i},
+\end{align}
+with type-specific band widths.
+
+The equivalent electric storage capacity is defined by converting the thermal storage margin into its electric-equivalent value:
+\begin{equation}
+    E^{\mathrm{eq}}_i =
+    \frac{\rho_a c_a V_i \left(T^{\max}_i - T^{\min}_i\right)}
+    {\mathrm{COP}_i},
+\end{equation}
+where $\rho_a$ is air density and $c_a$ is the specific heat of air.
+
+The equivalent electric charging power is
+\begin{equation}
+    P^{\mathrm{ch}}_i =
+    \frac{
+    U_i A^{s}_i \left(T^{\max}_i - T^{\ast}_i\right)
+    + \rho_a c_a V_i \tilde{N}^{\mathrm{ex}}_i \left(T^{\max}_i - T^{\ast}_i\right)
+    }{\mathrm{COP}_i},
+\end{equation}
+and the equivalent electric discharging power is
+\begin{equation}
+    P^{\mathrm{dis}}_i =
+    \frac{
+    U_i A^{s}_i \left(T^{\ast}_i - T^{\min}_i\right)
+    + \rho_a c_a V_i \tilde{N}^{\mathrm{ex}}_i \left(T^{\ast}_i - T^{\min}_i\right)
+    }{\mathrm{COP}_i}.
+\end{equation}
+In the implemented workflow, $P^{\mathrm{dis}}_i$ is subsequently used as the thermal-cooling-demand proxy for the micro-meteorological feedback module.
+
+\subsection{Grid Construction and Building-to-Grid Mapping}
+The Macau study area is discretized into square grids of side length $L_g=\SI{250}{m}$. Let $z$ denote a grid cell. Building centroids are mapped to grid cells after clipping the grid with the Macau administrative boundary downloaded from OSM. For each occupied grid, the following attributes are computed:
+\begin{equation}
+    A_z, \quad n_z, \quad \bar{H}_z,
+\end{equation}
+where $A_z$ is grid area, $n_z$ is the building count, and $\bar{H}_z$ is the mean building height. The building density is then
+\begin{equation}
+    D_z = \frac{n_z}{A_z}\times 10^6 \quad [\mathrm{buildings/km^2}].
+\end{equation}
+
+\subsection{Background Temperature and Continuous Urban Heat Island Correction}
+The scalar building temperatures are aggregated to the grid level:
+\begin{equation}
+    T^{\mathrm{met}}_z = \frac{1}{n_z}\sum_{i \in z} \bar{T}_i,
+\end{equation}
+and the global background reference is
+\begin{equation}
+    T^{\mathrm{met}} = \frac{1}{N_b}\sum_{i=1}^{N_b} \bar{T}_i,
+\end{equation}
+where $N_b$ is the number of buildings.
+
+The urban heat island (UHI) correction is represented as a continuous function of building density. Let the positive-density quantiles $q_{1/3}$, $q_{1/2}$, and $q_{2/3}$ define the open, normal-urban, and dense-urban density anchors, respectively. The UHI increment is then obtained by piecewise-linear interpolation:
+\begin{equation}
+    \Delta T^{\mathrm{UHI}}_z =
+    \mathcal{I}\left(
+    D_z;
+    \left[0, q_{1/3}, q_{1/2}, q_{2/3}\right],
+    \left[\Delta T_{\mathrm{open}}, \Delta T_{\mathrm{open}}, \Delta T_{\mathrm{normal}}, \Delta T_{\mathrm{dense}}\right]
+    \right),
+\end{equation}
+where $\mathcal{I}(\cdot)$ denotes linear interpolation. The baseline local grid temperature is
+\begin{equation}
+    T^{\mathrm{base}}_z = T^{\mathrm{met}}_z + \Delta T^{\mathrm{UHI}}_z.
+\end{equation}
+
+\subsection{AC Heat-Rejection Feedback}
+The building-level equivalent discharging power is used as the cooling-power input to the AC heat-rejection model:
+\begin{equation}
+    Q^{\mathrm{cool}}_i = P^{\mathrm{dis}}_i.
+\end{equation}
+The associated electric AC power is
+\begin{equation}
+    P^{\mathrm{AC}}_i = \frac{Q^{\mathrm{cool}}_i}{\mathrm{COP}_i},
+\end{equation}
+and the rejected outdoor heat is
+\begin{equation}
+    Q^{\mathrm{rej}}_i = Q^{\mathrm{cool}}_i + P^{\mathrm{AC}}_i.
+\end{equation}
+
+At the grid level, total rejected heat and rejected-heat flux density are
+\begin{align}
+    Q^{\mathrm{rej}}_z &= \sum_{i \in z} Q^{\mathrm{rej}}_i, \\
+    q^{\mathrm{rej}}_z &= \frac{Q^{\mathrm{rej}}_z}{A_z}.
+\end{align}
+
+Each grid is assigned a heat-dispersion coefficient $k_z$. In the present implementation, a rule-based default value is selected according to zone type:
+\begin{equation}
+    k_z \in \{k_{\mathrm{open}}, k_{\mathrm{normal}}, k_{\mathrm{dense}}\},
+\end{equation}
+unless explicit physical parameters $h^{\mathrm{mix}}_z$ and $u^{\mathrm{eff}}_z$ are available, in which case
+\begin{equation}
+    k_z = \frac{1}{\rho_a c_a h^{\mathrm{mix}}_z u^{\mathrm{eff}}_z}.
+\end{equation}
+The AC-induced grid temperature rise is then
+\begin{equation}
+    \Delta T^{\mathrm{AC}}_z = k_z q^{\mathrm{rej}}_z.
+\end{equation}
+The final local grid temperature becomes
+\begin{equation}
+    T^{\mathrm{local}}_z = T^{\mathrm{met}}_z + \Delta T^{\mathrm{UHI}}_z + \Delta T^{\mathrm{AC}}_z.
+\end{equation}
+
+\subsection{Building-Level Temperature Feedback}
+The grid-level temperature is written back to buildings according to their assigned cell:
+\begin{equation}
+    T^{\mathrm{local,grid}}_i = T^{\mathrm{local}}_{z(i)},
+\end{equation}
+where $z(i)$ denotes the grid containing building $i$.
+
+The codebase also supports a building-level inverse-distance-weighted refinement using nearby grid temperatures. However, in the current \texttt{main.py} configuration, this option is disabled for runtime efficiency, so the implemented building temperature is
+\begin{equation}
+    T^{\mathrm{local}}_i = T^{\mathrm{local,grid}}_i.
+\end{equation}
+This updated local temperature is then fed back into the fast temperature-dependent update stage, in which only $\mathrm{COP}_i$, comfort variables, $E^{\mathrm{eq}}_i$, $P^{\mathrm{ch}}_i$, and $P^{\mathrm{dis}}_i$ are recomputed, while geometry and envelope parameters remain unchanged.
+
+\subsection{Aggregated Flexibility Metrics}
+The building-level equivalent electric storage capacities and discharging powers are aggregated to obtain system-level metrics:
+\begin{align}
+    E^{\mathrm{agg}} &= \sum_{i=1}^{N_b} E^{\mathrm{eq}}_i, \\
+    P^{\mathrm{agg}} &= \sum_{i=1}^{N_b} P^{\mathrm{dis}}_i.
+\end{align}
+For reporting, the code converts these quantities into \si{MWh} and \si{MW}, respectively.
+
+\subsection{Carbon Emission Metric}
+An annualized carbon-emission indicator is computed from the building discharging power using a fixed electricity-emission factor $\gamma$:
+\begin{equation}
+    C_i =
+    \left(
+    \frac{P^{\mathrm{dis}}_i}{1000}
+    \right)
+    \frac{1}{3600}
+    \gamma
+    \times 8760,
+\end{equation}
+where $\gamma=\SI{0.67}{kgCO_2/kWh}$ in the current implementation. The resulting $C_i$ values are used for three-dimensional spatial visualization of building-level emission patterns.
+
+\subsection{Computational Implementation}
+Several implementation choices are used to reduce runtime without changing the core physical logic:
+\begin{enumerate}
+    \item vectorized station-to-building temperature interpolation;
+    \item reuse of cached building-to-grid mapping files;
+    \item optional disabling of building-level inverse-distance interpolation;
+    \item a fast second-pass update that recomputes only temperature-dependent quantities after micro-meteorological feedback.
+\end{enumerate}
+These measures are part of the current model implementation and therefore form part of the practical method used in this study.
+
+\section{Outputs}
+The workflow produces: 1) building-level thermal and flexibility variables, including $T^{\mathrm{local}}_i$, $\mathrm{COP}_i$, $E^{\mathrm{eq}}_i$, $P^{\mathrm{ch}}_i$, and $P^{\mathrm{dis}}_i$; 2) grid-level micro-meteorological variables, including $T^{\mathrm{met}}_z$, $\Delta T^{\mathrm{UHI}}_z$, $q^{\mathrm{rej}}_z$, $\Delta T^{\mathrm{AC}}_z$, and $T^{\mathrm{local}}_z$; and 3) system-level aggregate flexibility and carbon-emission indicators.
+
+\end{document}

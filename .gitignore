@@ -1,0 +1,20 @@
+# Python caches and virtual environments
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.venv/
+
+# Local caches and outputs
+cache/
+outputs/
+
+# Generated visualization artifacts
+data/*.html
+data/*.png
+
+# Large external datasets (keep local, do not version)
+data/energy system/
+Matlab code/
+macao shape raw/
+openstreetmap-main/
+osm2mat-master/

@@ -1,0 +1,59 @@
+{
+  "start_date": "2025-07-28 00:00:00+08:00",
+  "end_date": "2025-07-28 23:00:00+08:00",
+  "cache_schema_version": 2,
+  "params": {
+    "height_knn_k": 5,
+    "height_default_m": 10.0,
+    "uvalue_knn_k": 7
+  },
+  "input_sizes": {
+    "n_buildings": 12007,
+    "n_stations": 9,
+    "n_hours": 24
+  },
+  "input_signatures": {
+    "osm_buildings": {
+      "path": "C:\\Users\\wangs\\OneDrive - Newcastle University\\Documents_Newcastle\\Python_code\\D-caRbon\\data\\osm_macao_buildings.gpkg",
+      "exists": true,
+      "size": 8171520,
+      "mtime_ns": 1772482107180106800
+    },
+    "weather_table": {
+      "path": "C:\\Users\\wangs\\OneDrive - Newcastle University\\Documents_Newcastle\\Python_code\\D-caRbon\\data\\macao_weather_filled.csv",
+      "exists": true,
+      "size": 3268282,
+      "mtime_ns": 1773760005769555100
+    },
+    "building_thermal_py": {
+      "path": "C:\\Users\\wangs\\OneDrive - Newcastle University\\Documents_Newcastle\\Python_code\\D-caRbon\\src\\building\\building_thermal.py",
+      "exists": true,
+      "size": 28805,
+      "mtime_ns": 1773784029873832500
+    },
+    "classify_buildings_py": {
+      "path": "C:\\Users\\wangs\\OneDrive - Newcastle University\\Documents_Newcastle\\Python_code\\D-caRbon\\src\\data_io\\buildings.py",
+      "exists": true,
+      "size": 5749,
+      "mtime_ns": 1772232959000000000
+    },
+    "temperature_array": {
+      "shape": [
+        24,
+        9
+      ],
+      "dtype": "float64",
+      "sha1": "ac494e52f55ddf2a908cbc3999ea6c341da9759f"
+    },
+    "prepared_input_buildings": {
+      "n_rows": 12007,
+      "n_cols": 274,
+      "present_key_cols": [
+        "use_category",
+        "height",
+        "building:levels"
+      ],
+      "sha1": "945f351d452ae39df14a8eb402f3f1cb4266b706"
+    }
+  }
+}
