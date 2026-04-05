@@ -254,6 +254,12 @@ macao_building_updated["carbon_emission_scalar"] = (
     macao_building_property_updated["carbon_emission"].apply(to_numeric_scalar).to_numpy()
 )
 
+# 按当前年化碳指标口径，汇总所有建筑的降碳潜力并换算为日平均值。
+total_daily_avg_carbon_reduction_kg = (
+    pd.to_numeric(macao_building_updated["carbon_emission_scalar"], errors="coerce").fillna(0.0).sum()
+)
+print(f"Daily-average total carbon-reduction potential across all buildings: {total_daily_avg_carbon_reduction_kg:.2f} kgCO2")
+
 # fig：碳排放热力图
 web_map_path = export_building_heatmap_3d_web(
     macao_building_updated,
