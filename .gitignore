@@ -8,6 +8,4 @@ __pycache__/
 cache/
 outputs/
 
-# Generated visualization artifacts
-data/*.html
-data/*.png
+
